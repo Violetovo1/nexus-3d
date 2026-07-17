@@ -20,7 +20,7 @@ export async function POST(req: Request) {
         },
         body: JSON.stringify({
           input: imageUrl,
-          model: "tripo-v3.1",
+          model: "v3.1-20260211",
           texture: true,
           pbr: true,
           texture_quality: "detailed"
