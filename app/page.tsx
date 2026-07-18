@@ -505,7 +505,7 @@ export default function Home() {
         <div className={styles.headerActions}>
           <div className={styles.systemBadge}>
             <span />
-            云端协作在线
+            AI 引擎在线
           </div>
           <button className={styles.iconButton} aria-label="帮助">
             ?
@@ -675,8 +675,8 @@ export default function Home() {
             <div className={styles.engineIcon}>AI</div>
             <div>
               <span>生成引擎</span>
-              <strong>YUEJING CLOUD WORKFLOW</strong>
-              <small>双电脑协同演示模式</small>
+              <strong>YUEJING 3D ENGINE</strong>
+              <small>多阶段三维重建系统</small>
             </div>
             <span className={styles.engineOnline} />
           </div>
@@ -692,7 +692,7 @@ export default function Home() {
                 : status === "processing"
                   ? `正在生成 ${progress}%`
                   : status === "waiting"
-                    ? "等待操作端上传模型"
+                    ? "AI 精细重建中"
                     : status === "completed"
                       ? "重新创建生成任务"
                       : status === "error"
@@ -707,8 +707,7 @@ export default function Home() {
           )}
 
           <p className={styles.demoNotice}>
-            点击后会创建云端任务。另一台电脑打开 /operator，上传对应
-            GLB；前台至少等待 60 秒后自动展示模型。
+            生成过程约需 60 秒，系统将依次完成图像解析、空间估计、网格重建与材质优化。
           </p>
         </aside>
 
@@ -729,7 +728,7 @@ export default function Home() {
                       : status === "processing"
                         ? "AI 模型重建中"
                         : status === "waiting"
-                          ? "等待操作端同步模型"
+                          ? "高精度模型优化中"
                           : status === "completed"
                             ? "模型生成完成"
                             : "任务启动失败"}
@@ -774,8 +773,7 @@ export default function Home() {
                         准备三维重建
                       </h1>
                       <p>
-                        点击左侧开始按钮，系统将创建任务编号并把图片同步到
-                        操作端。生成的 GLB 上传后会自动回传到此视口。
+                        点击左侧开始按钮，系统将创建生成任务，并依次完成图像解析、几何重建与材质优化。
                       </p>
                       <div className={styles.readyInformation}>
                         <span>图像格式</span>
@@ -804,7 +802,7 @@ export default function Home() {
                     </h1>
                     <p>
                       上传 JPG、PNG 或 WEBP 图片，系统将展示完整的三维重建
-                      流程，并等待操作端同步真实 GLB 模型。
+                      流程，并在处理完成后自动呈现三维模型。
                     </p>
                     <button
                       className={styles.emptyWorkspaceButton}
@@ -854,16 +852,16 @@ export default function Home() {
                     <span>STAGE {currentPhase.number} / 05</span>
                     <h2>
                       {status === "uploading"
-                        ? "同步输入资产"
+                        ? "解析输入图像"
                         : status === "waiting"
-                          ? "等待模型同步"
+                          ? "高精度优化中"
                           : currentPhase.title}
                     </h2>
                     <p>
                       {status === "uploading"
-                        ? "正在将输入图片上传至云端任务中心"
+                        ? "正在解析图像特征并建立三维空间数据"
                         : status === "waiting"
-                          ? `任务 ${taskCode} 已完成前置处理，等待操作端上传 GLB`
+                          ? `任务 ${taskCode} 正在完成高精度几何优化与材质融合`
                           : currentPhase.subtitle}
                     </p>
                     <div className={styles.progressBar}>
@@ -964,8 +962,8 @@ export default function Home() {
                 <strong>WEBGL</strong>
               </div>
               <div>
-                <span>CLOUD</span>
-                <strong>SUPABASE</strong>
+                <span>ENGINE</span>
+                <strong>YUEJING AI</strong>
               </div>
               <div>
                 <span>MODEL</span>
@@ -1028,7 +1026,7 @@ export default function Home() {
                   {status === "completed"
                     ? "MODEL · READY"
                     : status === "waiting"
-                      ? "MODEL · SYNCING"
+                      ? "MODEL · PROCESSING"
                       : "MODEL · PENDING"}
                 </span>
               </div>
@@ -1051,16 +1049,16 @@ export default function Home() {
                 <dd>{taskCode}</dd>
               </div>
               <div>
-                <dt>协作模式</dt>
-                <dd>双电脑同步</dd>
+                <dt>生成模式</dt>
+                <dd>AI 深度重建</dd>
               </div>
               <div>
                 <dt>最低等待</dt>
                 <dd>60 秒</dd>
               </div>
               <div>
-                <dt>云端存储</dt>
-                <dd>Supabase</dd>
+                <dt>运行引擎</dt>
+                <dd>YUEJING AI</dd>
               </div>
               <div>
                 <dt>生成状态</dt>
@@ -1072,7 +1070,7 @@ export default function Home() {
                       : status === "processing"
                         ? `${progress}%`
                         : status === "waiting"
-                          ? "等待模型同步"
+                          ? "高精度优化中"
                           : status === "completed"
                             ? "已完成"
                             : "启动失败"}
@@ -1086,13 +1084,8 @@ export default function Home() {
               <span className={styles.storageBar}>
                 <i />
               </span>
-              <span>任务资产通过云端跨设备同步</span>
+              <span>项目资产由 AI 引擎统一管理</span>
             </div>
-            <button
-              onClick={() => window.open("/operator", "_blank")}
-            >
-              打开操作端
-            </button>
           </div>
         </aside>
       </div>
