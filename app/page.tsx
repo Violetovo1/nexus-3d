@@ -1,7 +1,7 @@
 "use client";
 
+import type { ChangeEvent, CSSProperties } from "react";
 import {
-  ChangeEvent,
   Suspense,
   useEffect,
   useMemo,
@@ -11,25 +11,34 @@ import {
 import { Canvas } from "@react-three/fiber";
 import {
   ContactShadows,
+  Environment,
+  Html,
   OrbitControls,
   useGLTF,
 } from "@react-three/drei";
 import styles from "./studio.module.css";
 
 const DEMO_DURATION = 60;
+const MODEL_PATH = "/models/demo.glb";
+
+type GenerationStatus =
+  | "idle"
+  | "processing"
+  | "waiting"
+  | "completed";
 
 const phases = [
   {
     max: 18,
     number: "01",
     title: "视觉特征解析",
-    subtitle: "识别主体轮廓、材质边界与结构关系",
+    subtitle: "识别主体轮廓、结构边界与纹理层级",
   },
   {
     max: 38,
     number: "02",
     title: "深度空间估计",
-    subtitle: "推演隐藏区域与三维空间层级",
+    subtitle: "推演隐藏区域、透视关系与空间尺度",
   },
   {
     max: 60,
@@ -41,71 +50,67 @@ const phases = [
     max: 82,
     number: "04",
     title: "网格拓扑重建",
-    subtitle: "连接点云数据，生成连续三角网格",
+    subtitle: "连接点云数据并生成连续三角网格",
   },
   {
     max: 100,
     number: "05",
     title: "材质纹理生成",
-    subtitle: "完成金属材质、光泽与纹理映射",
+    subtitle: "完成 PBR 材质、光泽与纹理映射",
   },
-];
+] as const;
 
-function DemoModel() {
-  const { scene } = useGLTF("/models/demo.glb");
-
+function Model({ url }: { url: string }) {
+  const { scene } = useGLTF(url);
   const clonedScene = useMemo(() => scene.clone(true), [scene]);
 
   return (
     <primitive
       object={clonedScene}
       scale={1.45}
-      position={[0, -0.72, 0]}
+      position={[0, -0.75, 0]}
     />
   );
 }
 
-function ModelViewport() {
+function ModelViewport({ url }: { url: string }) {
   return (
     <Canvas
-      camera={{
-        position: [0, 1.15, 4.8],
-        fov: 38,
-      }}
+      camera={{ position: [0, 1.15, 4.8], fov: 38 }}
       dpr={[1, 1.8]}
-      gl={{
-        antialias: true,
-        alpha: true,
-      }}
+      gl={{ antialias: true, alpha: true }}
     >
-      <ambientLight intensity={1.7} />
-
+      <ambientLight intensity={1.55} />
       <directionalLight
         position={[4, 6, 4]}
-        intensity={3.2}
-        color="#fff1c7"
+        intensity={3.4}
+        color="#fff0c8"
       />
-
       <directionalLight
         position={[-4, 2, -3]}
-        intensity={2.2}
-        color="#62e8ff"
+        intensity={2.15}
+        color="#66e5f0"
       />
-
       <spotLight
-        position={[0, 6, 1]}
-        angle={0.5}
+        position={[0, 6, 2]}
+        angle={0.55}
         penumbra={1}
-        intensity={5}
-        color="#eabf68"
+        intensity={4.4}
+        color="#e5b75f"
       />
 
-      <Suspense fallback={null}>
-        <DemoModel />
-
+      <Suspense
+        fallback={
+          <Html center>
+            <div className={styles.modelLoading}>模型载入中...</div>
+          </Html>
+        }
+      >
+        <Model url={url} />
+        <Environment preset="city" />
         <ContactShadows
-          position={[0, -1.25, 0]}
-          opacity={0.55}
+          position={[0, -1.28, 0]}
+          opacity={0.5}
           scale={8}
           blur={2.8}
           far={4}
@@ -119,7 +124,7 @@ function ModelViewport() {
         minDistance={2.7}
         maxDistance={8}
         autoRotate
-        autoRotateSpeed={0.75}
+        autoRotateSpeed={0.72}
       />
     </Canvas>
   );
@@ -132,7 +137,7 @@ function CircularProgress({ progress }: { progress: number }) {
       style={
         {
           "--progress": `${progress * 3.6}deg`,
-        } as React.CSSProperties
+        } as CSSProperties
       }
     >
       <div className={styles.circularProgressInner}>
@@ -145,61 +150,80 @@ function CircularProgress({ progress }: { progress: number }) {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const generationTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const modelPollingRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
-  );
-
+  const [status, setStatus] = useState<GenerationStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [remainingSeconds, setRemainingSeconds] =
     useState(DEMO_DURATION);
-
-  const [status, setStatus] = useState<
-    "idle" | "processing" | "completed"
-  >("idle");
-
-  const [viewMode, setViewMode] = useState<"video" | "model">(
-    "video",
-  );
-
   const [modelAvailable, setModelAvailable] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [taskCode, setTaskCode] = useState("--");
 
   const currentPhaseIndex = phases.findIndex(
     (phase) => progress <= phase.max,
   );
-
   const safePhaseIndex =
-    currentPhaseIndex === -1
-      ? phases.length - 1
-      : currentPhaseIndex;
-
+    currentPhaseIndex === -1 ? phases.length - 1 : currentPhaseIndex;
   const currentPhase = phases[safePhaseIndex];
 
   useEffect(() => {
-    fetch("/models/demo.glb", {
-      method: "HEAD",
-    })
-      .then((response) => {
-        setModelAvailable(response.ok);
-      })
-      .catch(() => {
-        setModelAvailable(false);
-      });
+    void checkModelAvailability();
+
+    return () => {
+      clearTimers();
+    };
   }, []);
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-
       if (previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
     };
   }, [previewUrl]);
+
+  function clearTimers() {
+    if (generationTimerRef.current) {
+      clearInterval(generationTimerRef.current);
+      generationTimerRef.current = null;
+    }
+
+    if (modelPollingRef.current) {
+      clearInterval(modelPollingRef.current);
+      modelPollingRef.current = null;
+    }
+  }
+
+  async function checkModelAvailability() {
+    try {
+      const response = await fetch(
+        `${MODEL_PATH}?check=${Date.now()}`,
+        {
+          method: "HEAD",
+          cache: "no-store",
+        },
+      );
+
+      setModelAvailable(response.ok);
+      return response.ok;
+    } catch {
+      setModelAvailable(false);
+      return false;
+    }
+  }
+
+  function createTaskCode() {
+    const suffix = Math.floor(100000 + Math.random() * 900000);
+    return `YJ-${suffix}`;
+  }
 
   function selectFile(file?: File) {
     if (!file) return;
@@ -210,86 +234,124 @@ export default function Home() {
     }
 
     if (file.size > 20 * 1024 * 1024) {
-      alert("图片不能超过 20MB");
+      alert("图片大小不能超过 20MB");
       return;
     }
+
+    clearTimers();
 
     if (previewUrl.startsWith("blob:")) {
       URL.revokeObjectURL(previewUrl);
     }
 
-    const localUrl = URL.createObjectURL(file);
-
     setUploadedFile(file);
-    setPreviewUrl(localUrl);
+    setPreviewUrl(URL.createObjectURL(file));
     setStatus("idle");
     setProgress(0);
     setRemainingSeconds(DEMO_DURATION);
-    setViewMode("video");
+    setTaskCode("--");
   }
 
-  function handleFileChange(
-    event: ChangeEvent<HTMLInputElement>,
-  ) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     selectFile(event.target.files?.[0]);
+    event.target.value = "";
+  }
+
+  function startModelPolling() {
+    if (modelPollingRef.current) {
+      clearInterval(modelPollingRef.current);
+    }
+
+    modelPollingRef.current = setInterval(async () => {
+      const ready = await checkModelAvailability();
+
+      if (ready) {
+        if (modelPollingRef.current) {
+          clearInterval(modelPollingRef.current);
+          modelPollingRef.current = null;
+        }
+
+        setProgress(100);
+        setStatus("completed");
+      }
+    }, 2000);
+  }
+
+  async function finishGeneration() {
+    const ready = await checkModelAvailability();
+
+    if (ready) {
+      setProgress(100);
+      setRemainingSeconds(0);
+      setStatus("completed");
+      return;
+    }
+
+    setProgress(98);
+    setRemainingSeconds(0);
+    setStatus("waiting");
+    startModelPolling();
   }
 
   function startGeneration() {
+    if (!uploadedFile || !previewUrl) {
+      alert("请先上传一张图片，再开始生成模型");
+      fileInputRef.current?.click();
+      return;
+    }
+
     if (status === "processing") return;
 
+    clearTimers();
+    setTaskCode(createTaskCode());
     setStatus("processing");
     setProgress(0);
     setRemainingSeconds(DEMO_DURATION);
-    setViewMode("video");
 
     const startedAt = Date.now();
 
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-
-    timerRef.current = setInterval(() => {
+    generationTimerRef.current = setInterval(() => {
       const elapsed = (Date.now() - startedAt) / 1000;
-      const nextProgress = Math.min(
-        100,
-        Math.floor((elapsed / DEMO_DURATION) * 100),
+      const ratio = Math.min(1, elapsed / DEMO_DURATION);
+      const easedProgress = Math.floor(
+        98 * (1 - Math.pow(1 - ratio, 1.45)),
       );
 
-      setProgress(nextProgress);
+      setProgress(Math.min(98, easedProgress));
       setRemainingSeconds(
         Math.max(0, Math.ceil(DEMO_DURATION - elapsed)),
       );
 
       if (elapsed >= DEMO_DURATION) {
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
+        if (generationTimerRef.current) {
+          clearInterval(generationTimerRef.current);
+          generationTimerRef.current = null;
         }
 
-        setProgress(100);
-        setRemainingSeconds(0);
-        setStatus("completed");
-
-        if (modelAvailable) {
-          setViewMode("model");
-        }
+        void finishGeneration();
       }
     }, 200);
   }
 
   function resetWorkspace() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-
+    clearTimers();
     setStatus("idle");
     setProgress(0);
     setRemainingSeconds(DEMO_DURATION);
-    setViewMode("video");
+    setTaskCode("--");
   }
+
+  const fileSize = uploadedFile
+    ? `${(uploadedFile.size / 1024 / 1024).toFixed(2)} MB`
+    : "--";
+
+  const fileFormat = uploadedFile
+    ? uploadedFile.type.replace("image/", "").toUpperCase()
+    : "--";
 
   return (
     <main className={styles.app}>
-      <div className={styles.background}>
+      <div className={styles.background} aria-hidden="true">
         <div className={styles.auroraGold} />
         <div className={styles.auroraBlue} />
         <div className={styles.auroraPurple} />
@@ -297,14 +359,13 @@ export default function Home() {
         <div className={styles.noise} />
 
         <img
-  className={styles.xiezhiBackground}
-  src="/assets/xiezhi-bg.png"
-  alt=""
-  aria-hidden="true"
-/>
+          className={styles.xiezhiBackground}
+          src="/assets/xiezhi-bg.png"
+          alt=""
+        />
 
         <div className={styles.particles}>
-          {Array.from({ length: 24 }).map((_, index) => (
+          {Array.from({ length: 26 }).map((_, index) => (
             <span
               key={index}
               style={
@@ -313,7 +374,7 @@ export default function Home() {
                   "--y": `${(index * 61) % 100}%`,
                   "--delay": `${(index % 8) * -1.2}s`,
                   "--duration": `${8 + (index % 6)}s`,
-                } as React.CSSProperties
+                } as CSSProperties
               }
             />
           ))}
@@ -346,9 +407,9 @@ export default function Home() {
             <span />
             演示引擎在线
           </div>
-
-          <button className={styles.iconButton}>?</button>
-
+          <button className={styles.iconButton} aria-label="帮助">
+            ?
+          </button>
           <div className={styles.avatar}>越</div>
         </div>
       </header>
@@ -359,29 +420,23 @@ export default function Home() {
             <span className={styles.toolIcon}>◇</span>
             <span>生成</span>
           </button>
-
           <button>
             <span className={styles.toolIcon}>▦</span>
             <span>资产</span>
           </button>
-
           <button>
             <span className={styles.toolIcon}>◫</span>
             <span>纹理</span>
           </button>
-
           <button>
             <span className={styles.toolIcon}>△</span>
             <span>拓扑</span>
           </button>
-
           <button>
             <span className={styles.toolIcon}>◎</span>
             <span>动画</span>
           </button>
-
           <div className={styles.toolRailSpacer} />
-
           <button>
             <span className={styles.toolIcon}>⚙</span>
             <span>设置</span>
@@ -391,12 +446,9 @@ export default function Home() {
         <aside className={styles.controlPanel}>
           <div className={styles.panelHeader}>
             <div>
-              <span className={styles.sectionCode}>
-                IMAGE TO 3D
-              </span>
+              <span className={styles.sectionCode}>IMAGE TO 3D</span>
               <h2>图片生成模型</h2>
             </div>
-
             <span className={styles.demoTag}>DEMO</span>
           </div>
 
@@ -413,9 +465,7 @@ export default function Home() {
               event.preventDefault();
               setDragging(true);
             }}
-            onDragOver={(event) => {
-              event.preventDefault();
-            }}
+            onDragOver={(event) => event.preventDefault()}
             onDragLeave={() => setDragging(false)}
             onDrop={(event) => {
               event.preventDefault();
@@ -432,19 +482,27 @@ export default function Home() {
               hidden
             />
 
-            <img
-              src={previewUrl}
-              alt="输入图片预览"
-              className={styles.uploadPreview}
-            />
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="输入图片预览"
+                className={styles.uploadPreview}
+              />
+            ) : (
+              <div className={styles.emptyUploadPreview}>
+                <div className={styles.emptyUploadIcon}>＋</div>
+                <strong>拖入或选择图片</strong>
+                <span>支持 JPG、PNG、WEBP</span>
+              </div>
+            )}
 
-            <div className={styles.uploadOverlay}>
-              <div className={styles.uploadIcon}>＋</div>
-              <strong>
-                {uploadedFile ? "更换图片" : "上传参考图片"}
-              </strong>
-              <span>JPG · PNG · WEBP</span>
-            </div>
+            {previewUrl && (
+              <div className={styles.uploadOverlay}>
+                <div className={styles.uploadIcon}>↥</div>
+                <strong>点击更换图片</strong>
+                <span>JPG · PNG · WEBP</span>
+              </div>
+            )}
 
             <div className={styles.cornerTopLeft} />
             <div className={styles.cornerTopRight} />
@@ -458,11 +516,19 @@ export default function Home() {
               <strong>
                 {uploadedFile
                   ? uploadedFile.name
-                  : "模型.jpg"}
+                  : "尚未选择输入图片"}
               </strong>
             </div>
 
-            <span className={styles.readyBadge}>READY</span>
+            <span
+              className={
+                uploadedFile
+                  ? styles.readyBadge
+                  : styles.waitingBadge
+              }
+            >
+              {uploadedFile ? "READY" : "WAITING"}
+            </span>
           </div>
 
           <section className={styles.settingsSection}>
@@ -476,7 +542,6 @@ export default function Home() {
                 <strong>几何质量</strong>
                 <span>高精度网格重建</span>
               </div>
-
               <select defaultValue="精细">
                 <option>标准</option>
                 <option>精细</option>
@@ -489,7 +554,6 @@ export default function Home() {
                 <strong>PBR 材质</strong>
                 <span>金属度与粗糙度贴图</span>
               </div>
-
               <button className={styles.switchActive}>
                 <span />
               </button>
@@ -500,7 +564,6 @@ export default function Home() {
                 <strong>智能拓扑</strong>
                 <span>自动优化模型面数</span>
               </div>
-
               <button className={styles.switchActive}>
                 <span />
               </button>
@@ -511,7 +574,6 @@ export default function Home() {
                 <strong>自动补全</strong>
                 <span>推演被遮挡结构</span>
               </div>
-
               <button className={styles.switchActive}>
                 <span />
               </button>
@@ -520,55 +582,56 @@ export default function Home() {
 
           <div className={styles.engineCard}>
             <div className={styles.engineIcon}>AI</div>
-
             <div>
               <span>生成引擎</span>
               <strong>YUEJING 3D ENGINE</strong>
-              <small>高精度演示模型</small>
+              <small>高精度演示模式</small>
             </div>
-
             <span className={styles.engineOnline} />
           </div>
 
           <button
             className={styles.generateButton}
             onClick={startGeneration}
-            disabled={status === "processing"}
+            disabled={!uploadedFile || status === "processing"}
           >
             <span>
               {status === "processing"
                 ? `正在生成 ${progress}%`
-                : status === "completed"
-                  ? "重新生成模型"
-                  : "开始生成 3D 模型"}
+                : status === "waiting"
+                  ? "等待模型同步"
+                  : status === "completed"
+                    ? "重新生成模型"
+                    : "开始生成 3D 模型"}
             </span>
-
             <span className={styles.buttonArrow}>→</span>
           </button>
 
           <p className={styles.demoNotice}>
-            演示模式将在约 60 秒后呈现预置模型，不产生
-            API 费用。
+            系统将至少展示 60 秒生成过程；模型未就绪时会停在
+            98% 等待同步。
           </p>
         </aside>
 
         <section className={styles.viewport}>
           <div className={styles.viewportHeader}>
             <div className={styles.viewportTitle}>
-              <span className={styles.viewportStatusDot} />
-
+              <span
+                className={`${styles.viewportStatusDot} ${
+                  status === "waiting" ? styles.statusWaiting : ""
+                }`}
+              />
               <div>
                 <strong>
                   {status === "idle"
-                    ? "等待生成"
+                    ? "等待输入"
                     : status === "processing"
                       ? "AI 模型重建中"
-                      : "模型生成完成"}
+                      : status === "waiting"
+                        ? "等待模型同步"
+                        : "模型生成完成"}
                 </strong>
-
-                <span>
-                  PROJECT / XIEZHI_GOLDEN_SCULPTURE
-                </span>
+                <span>PROJECT / {taskCode}</span>
               </div>
             </div>
 
@@ -576,32 +639,6 @@ export default function Home() {
               <button>适应视图</button>
               <button>网格</button>
               <button>灯光</button>
-
-              {status === "completed" && modelAvailable && (
-                <div className={styles.viewSwitch}>
-                  <button
-                    className={
-                      viewMode === "video"
-                        ? styles.activeView
-                        : ""
-                    }
-                    onClick={() => setViewMode("video")}
-                  >
-                    动态展示
-                  </button>
-
-                  <button
-                    className={
-                      viewMode === "model"
-                        ? styles.activeView
-                        : ""
-                    }
-                    onClick={() => setViewMode("model")}
-                  >
-                    3D 交互
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
@@ -615,50 +652,85 @@ export default function Home() {
 
             {status === "idle" && (
               <div className={styles.idleState}>
-                <div className={styles.idleArtwork}>
-                  <img
-                    src={previewUrl}
-                    alt="模型"
-                  />
+                {previewUrl ? (
+                  <>
+                    <div className={styles.idleArtwork}>
+                      <img
+                        src={previewUrl}
+                        alt="当前上传的参考图片"
+                      />
+                      <div className={styles.idleGlow} />
+                      <div className={styles.idleLabel}>
+                        <span>REFERENCE IMAGE</span>
+                        <strong>{uploadedFile?.name}</strong>
+                      </div>
+                    </div>
 
-                  <div className={styles.idleGlow} />
+                    <div className={styles.idleCopy}>
+                      <span className={styles.copyEyebrow}>
+                        INPUT ASSET READY
+                      </span>
+                      <h1>
+                        图像已载入
+                        <br />
+                        准备三维重建
+                      </h1>
+                      <p>
+                        点击左侧“开始生成 3D 模型”，系统将依次展示
+                        视觉解析、深度估计、点云构建、网格重建与材质生成。
+                      </p>
 
-                  <div className={styles.idleLabel}>
-                    <span>REFERENCE IMAGE</span>
-                    <strong>模型</strong>
+                      <div className={styles.readyInformation}>
+                        <span>图像格式</span>
+                        <strong>{fileFormat}</strong>
+                        <span>文件大小</span>
+                        <strong>{fileSize}</strong>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.emptyWorkspace}>
+                    <div className={styles.emptyWorkspaceVisual}>
+                      <div className={styles.emptyCube}>
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <div className={styles.emptyOrbit} />
+                      <div className={styles.emptyOrbitSecond} />
+                    </div>
+
+                    <span className={styles.copyEyebrow}>
+                      AI IMAGE TO 3D
+                    </span>
+                    <h1>
+                      上传图像
+                      <br />
+                      开启三维创造
+                    </h1>
+                    <p>
+                      从左侧上传一张 JPG、PNG 或 WEBP 图片，
+                      系统将在生成过程中展示完整的 AI 三维重建流程。
+                    </p>
+                    <button
+                      className={styles.emptyWorkspaceButton}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      选择输入图片
+                      <span>→</span>
+                    </button>
                   </div>
-                </div>
-
-                <div className={styles.idleCopy}>
-                  <span className={styles.copyEyebrow}>
-                    AI IMAGE TO 3D
-                  </span>
-
-                  <h1>
-                    让二维图像
-                    <br />
-                    进入三维世界
-                  </h1>
-
-                  <p>
-                    上传一张图片，启动视觉解析、空间估计、
-                    点云构建、网格重建与材质生成演示。
-                  </p>
-                </div>
+                )}
               </div>
             )}
 
-            {status === "processing" && (
+            {(status === "processing" || status === "waiting") && (
               <div className={styles.processingState}>
-                <video
-                  className={styles.processingVideo}
-                  src="/assets/xiezhi-showcase.mp4"
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
+                <img
+                  className={styles.processingImage}
+                  src={previewUrl}
+                  alt="生成中的输入图片"
                 />
-
                 <div className={styles.processingShade} />
                 <div className={styles.scanLine} />
 
@@ -670,20 +742,18 @@ export default function Home() {
                 </div>
 
                 <div className={styles.pointCloud}>
-                  {Array.from({ length: 60 }).map(
-                    (_, index) => (
-                      <i
-                        key={index}
-                        style={
-                          {
-                            "--px": `${(index * 47) % 92}%`,
-                            "--py": `${(index * 73) % 88}%`,
-                            "--pd": `${(index % 12) * -0.2}s`,
-                          } as React.CSSProperties
-                        }
-                      />
-                    ),
-                  )}
+                  {Array.from({ length: 66 }).map((_, index) => (
+                    <i
+                      key={index}
+                      style={
+                        {
+                          "--px": `${(index * 47) % 92}%`,
+                          "--py": `${(index * 73) % 88}%`,
+                          "--pd": `${(index % 12) * -0.2}s`,
+                        } as CSSProperties
+                      }
+                    />
+                  ))}
                 </div>
 
                 <div className={styles.processingHud}>
@@ -693,40 +763,42 @@ export default function Home() {
                     <span>
                       STAGE {currentPhase.number} / 05
                     </span>
-
-                    <h2>{currentPhase.title}</h2>
-                    <p>{currentPhase.subtitle}</p>
+                    <h2>
+                      {status === "waiting"
+                        ? "等待模型同步"
+                        : currentPhase.title}
+                    </h2>
+                    <p>
+                      {status === "waiting"
+                        ? "生成流程已完成，正在等待操作端上传 GLB 模型"
+                        : currentPhase.subtitle}
+                    </p>
 
                     <div className={styles.progressBar}>
-                      <div
-                        style={{
-                          width: `${progress}%`,
-                        }}
-                      />
+                      <div style={{ width: `${progress}%` }} />
                     </div>
 
                     <div className={styles.progressMeta}>
                       <span>
-                        ESTIMATED TIME{" "}
+                        ESTIMATED TIME
                         <strong>
-                          00:
-                          {remainingSeconds
-                            .toString()
-                            .padStart(2, "0")}
+                          {status === "waiting"
+                            ? "SYNC"
+                            : `00:${remainingSeconds
+                                .toString()
+                                .padStart(2, "0")}`}
                         </strong>
                       </span>
-
                       <span>
-                        VERTICES{" "}
+                        VERTICES
                         <strong>
                           {Math.floor(
                             4280 + progress * 2167,
                           ).toLocaleString()}
                         </strong>
                       </span>
-
                       <span>
-                        FACES{" "}
+                        FACES
                         <strong>
                           {Math.floor(
                             2100 + progress * 1059,
@@ -753,11 +825,13 @@ export default function Home() {
                       <div>
                         <strong>{phase.title}</strong>
                         <small>
-                          {index < safePhaseIndex
-                            ? "COMPLETE"
-                            : index === safePhaseIndex
-                              ? "PROCESSING"
-                              : "PENDING"}
+                          {status === "waiting" && index === 4
+                            ? "WAITING MODEL"
+                            : index < safePhaseIndex
+                              ? "COMPLETE"
+                              : index === safePhaseIndex
+                                ? "PROCESSING"
+                                : "PENDING"}
                         </small>
                       </div>
                     </div>
@@ -768,30 +842,15 @@ export default function Home() {
 
             {status === "completed" && (
               <div className={styles.completedState}>
-                {viewMode === "model" && modelAvailable ? (
-                  <div className={styles.modelCanvas}>
-                    <ModelViewport />
-                  </div>
-                ) : (
-                  <video
-                    className={styles.resultVideo}
-                    src="/assets/xiezhi-showcase.mp4"
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    controls
-                  />
-                )}
+                <div className={styles.modelCanvas}>
+                  <ModelViewport url={MODEL_PATH} />
+                </div>
 
                 <div className={styles.completedBadge}>
-                  <span className={styles.completedCheck}>
-                    ✓
-                  </span>
-
+                  <span className={styles.completedCheck}>✓</span>
                   <div>
                     <span>GENERATION COMPLETE</span>
-                    <strong>高精度模型</strong>
+                    <strong>高精度三维模型已同步</strong>
                   </div>
                 </div>
 
@@ -800,17 +859,14 @@ export default function Home() {
                     <span>顶点</span>
                     <strong>220,980</strong>
                   </div>
-
                   <div>
                     <span>面数</span>
                     <strong>108,024</strong>
                   </div>
-
                   <div>
                     <span>材质</span>
                     <strong>PBR 4K</strong>
                   </div>
-
                   <div>
                     <span>格式</span>
                     <strong>GLB</strong>
@@ -824,20 +880,19 @@ export default function Home() {
                 <span>FPS</span>
                 <strong>60</strong>
               </div>
-
               <div>
                 <span>RENDER</span>
                 <strong>WEBGL</strong>
               </div>
-
               <div>
                 <span>ENGINE</span>
                 <strong>YJ-3D</strong>
               </div>
-
-              <button onClick={resetWorkspace}>
-                重置视图
-              </button>
+              <div>
+                <span>MODEL</span>
+                <strong>{modelAvailable ? "READY" : "PENDING"}</strong>
+              </div>
+              <button onClick={resetWorkspace}>重置视图</button>
             </div>
           </div>
         </section>
@@ -848,14 +903,11 @@ export default function Home() {
               <span>PROJECT ASSETS</span>
               <h3>项目资产</h3>
             </div>
-
             <button>＋</button>
           </div>
 
           <div className={styles.assetTabs}>
-            <button className={styles.activeAssetTab}>
-              全部
-            </button>
+            <button className={styles.activeAssetTab}>全部</button>
             <button>图像</button>
             <button>模型</button>
           </div>
@@ -866,36 +918,24 @@ export default function Home() {
           </div>
 
           <div className={styles.assetList}>
-            <button className={styles.activeAsset}>
+            <button className={uploadedFile ? styles.activeAsset : ""}>
               <div className={styles.assetThumbnail}>
-                <img
-                  src="/assets/xiezhi-reference.jpg"
-                  alt="獬豸参考图"
-                />
+                {previewUrl ? (
+                  <img src={previewUrl} alt="输入图片" />
+                ) : (
+                  <div className={styles.emptyAssetThumbnail}>＋</div>
+                )}
               </div>
-
               <div className={styles.assetInformation}>
-                <strong>獬豸参考图</strong>
-                <span>IMAGE · JPG</span>
+                <strong>
+                  {uploadedFile ? uploadedFile.name : "等待输入图片"}
+                </strong>
+                <span>
+                  {uploadedFile
+                    ? `IMAGE · ${fileFormat}`
+                    : "IMAGE · EMPTY"}
+                </span>
               </div>
-
-              <span className={styles.assetMenu}>•••</span>
-            </button>
-
-            <button>
-              <div className={styles.assetThumbnail}>
-                <video
-                  src="/assets/xiezhi-showcase.mp4"
-                  muted
-                />
-                <span className={styles.playIcon}>▶</span>
-              </div>
-
-              <div className={styles.assetInformation}>
-                <strong>模型动态展示</strong>
-                <span>VIDEO · MP4</span>
-              </div>
-
               <span className={styles.assetMenu}>•••</span>
             </button>
 
@@ -905,21 +945,19 @@ export default function Home() {
               >
                 <span>3D</span>
               </div>
-
               <div className={styles.assetInformation}>
-                <strong>模型</strong>
+                <strong>生成模型</strong>
                 <span>
                   {status === "completed"
                     ? "MODEL · READY"
-                    : "MODEL · PENDING"}
+                    : status === "waiting"
+                      ? "MODEL · SYNCING"
+                      : "MODEL · PENDING"}
                 </span>
               </div>
-
               <span
                 className={`${styles.assetState} ${
-                  status === "completed"
-                    ? styles.assetStateReady
-                    : ""
+                  status === "completed" ? styles.assetStateReady : ""
                 }`}
               />
             </button>
@@ -927,31 +965,27 @@ export default function Home() {
 
           <div className={styles.assetDetails}>
             <div className={styles.detailTitle}>
-              <span>资产信息</span>
+              <span>任务信息</span>
               <small>DETAILS</small>
             </div>
 
             <dl>
               <div>
-                <dt>项目名称</dt>
-                <dd>模型</dd>
+                <dt>任务编号</dt>
+                <dd>{taskCode}</dd>
               </div>
-
               <div>
                 <dt>创建方式</dt>
                 <dd>图片生成 3D</dd>
               </div>
-
               <div>
                 <dt>模型质量</dt>
                 <dd>高精度</dd>
               </div>
-
               <div>
                 <dt>纹理规格</dt>
                 <dd>PBR · 4K</dd>
               </div>
-
               <div>
                 <dt>生成状态</dt>
                 <dd>
@@ -959,7 +993,9 @@ export default function Home() {
                     ? "等待开始"
                     : status === "processing"
                       ? `${progress}%`
-                      : "已完成"}
+                      : status === "waiting"
+                        ? "等待模型同步"
+                        : "已完成"}
                 </dd>
               </div>
             </dl>
@@ -970,10 +1006,8 @@ export default function Home() {
               <span className={styles.storageBar}>
                 <i />
               </span>
-
               <span>项目存储 1.28 GB / 10 GB</span>
             </div>
-
             <button>管理资产</button>
           </div>
         </aside>
@@ -981,5 +1015,3 @@ export default function Home() {
     </main>
   );
 }
-
-useGLTF.preload("/models/demo.glb");
