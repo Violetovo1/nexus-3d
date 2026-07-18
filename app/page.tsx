@@ -10,6 +10,8 @@ import {
 } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
+  Bounds,
+  Center,
   ContactShadows,
   Environment,
   Html,
@@ -85,19 +87,13 @@ function Model({ url }: { url: string }) {
   const { scene } = useGLTF(url);
   const clonedScene = useMemo(() => scene.clone(true), [scene]);
 
-  return (
-    <primitive
-      object={clonedScene}
-      scale={1.45}
-      position={[0, -0.75, 0]}
-    />
-  );
+  return <primitive object={clonedScene} />;
 }
 
 function ModelViewport({ url }: { url: string }) {
   return (
     <Canvas
-      camera={{ position: [0, 1.15, 4.8], fov: 38 }}
+      camera={{ position: [0, 1.2, 5], fov: 35, near: 0.01, far: 1000 }}
       dpr={[1, 1.8]}
       gl={{ antialias: true, alpha: true }}
     >
@@ -127,25 +123,40 @@ function ModelViewport({ url }: { url: string }) {
           </Html>
         }
       >
-        <Model url={url} />
+        <Bounds
+          key={url}
+          fit
+          clip
+          observe
+          margin={1.35}
+          maxDuration={0.8}
+        >
+          <Center bottom>
+            <Model url={url} />
+          </Center>
+        </Bounds>
+
         <Environment preset="city" />
         <ContactShadows
-          position={[0, -1.28, 0]}
-          opacity={0.5}
-          scale={8}
-          blur={2.8}
-          far={4}
+          position={[0, -0.015, 0]}
+          opacity={0.42}
+          scale={10}
+          blur={3}
+          far={6}
         />
       </Suspense>
 
       <OrbitControls
+        makeDefault
         enablePan={false}
         enableDamping
         dampingFactor={0.06}
-        minDistance={2.7}
-        maxDistance={8}
+        minDistance={0.8}
+        maxDistance={30}
+        minPolarAngle={0.35}
+        maxPolarAngle={Math.PI / 2.05}
         autoRotate
-        autoRotateSpeed={0.72}
+        autoRotateSpeed={0.55}
       />
     </Canvas>
   );
