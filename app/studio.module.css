@@ -2001,3 +2001,53 @@
     border-bottom: 1px solid var(--line);
   }
 }
+.xiezhiBackground {
+  position: absolute;
+  z-index: 1;
+  right: -4%;
+  bottom: -7%;
+  width: min(54vw, 900px);
+  height: auto;
+
+  opacity: 0.13;
+  pointer-events: none;
+  user-select: none;
+
+  filter:
+    saturate(0.85)
+    contrast(1.08)
+    drop-shadow(0 0 45px rgba(226, 174, 78, 0.18));
+
+  transform: rotate(-2deg);
+  transform-origin: center;
+
+  animation: xiezhiFloat 10s ease-in-out infinite alternate;
+
+  mask-image: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.9),
+    rgba(0, 0, 0, 0.55) 65%,
+    transparent
+  );
+}
+
+@keyframes xiezhiFloat {
+  from {
+    transform: translate3d(0, 0, 0) rotate(-2deg) scale(1);
+  }
+
+  to {
+    transform: translate3d(-18px, -12px, 0)
+      rotate(-1deg)
+      scale(1.025);
+  }
+}
+
+@media (max-width: 900px) {
+  .xiezhiBackground {
+    right: -25%;
+    bottom: 5%;
+    width: 110vw;
+    opacity: 0.07;
+  }
+}
