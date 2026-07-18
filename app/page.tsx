@@ -148,8 +148,7 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState(
-    "/assets/xiezhi-reference.jpg",
+  const [previewUrl, setPreviewUrl] = useState("");
   );
 
   const [progress, setProgress] = useState(0);
