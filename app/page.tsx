@@ -16,16 +16,37 @@ import {
   OrbitControls,
   useGLTF,
 } from "@react-three/drei";
+
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import styles from "./studio.module.css";
 
-const DEMO_DURATION = 60;
-const MODEL_PATH = "/models/demo.glb";
+const MINIMUM_DURATION = 60;
 
 type GenerationStatus =
   | "idle"
+  | "uploading"
   | "processing"
   | "waiting"
-  | "completed";
+  | "completed"
+  | "error";
+
+type CreatedJobResponse = {
+  job: {
+    code: string;
+  };
+  upload: {
+    bucket: string;
+    path: string;
+    token: string;
+  };
+};
+
+type JobStatusResponse = {
+  code: string;
+  status: string;
+  model_url: string | null;
+  model_name: string | null;
+};
 
 const phases = [
   {
@@ -150,22 +171,22 @@ function CircularProgress({ progress }: { progress: number }) {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const generationTimerRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
-  const modelPollingRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startedAtRef = useRef(0);
+  const modelUrlRef = useRef<string | null>(null);
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [status, setStatus] = useState<GenerationStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [remainingSeconds, setRemainingSeconds] =
-    useState(DEMO_DURATION);
-  const [modelAvailable, setModelAvailable] = useState(false);
+    useState(MINIMUM_DURATION);
   const [dragging, setDragging] = useState(false);
   const [taskCode, setTaskCode] = useState("--");
+  const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [modelName, setModelName] = useState("生成模型.glb");
+  const [errorMessage, setErrorMessage] = useState("");
 
   const currentPhaseIndex = phases.findIndex(
     (phase) => progress <= phase.max,
@@ -175,8 +196,6 @@ export default function Home() {
   const currentPhase = phases[safePhaseIndex];
 
   useEffect(() => {
-    void checkModelAvailability();
-
     return () => {
       clearTimers();
     };
@@ -191,44 +210,21 @@ export default function Home() {
   }, [previewUrl]);
 
   function clearTimers() {
-    if (generationTimerRef.current) {
-      clearInterval(generationTimerRef.current);
-      generationTimerRef.current = null;
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
     }
 
-    if (modelPollingRef.current) {
-      clearInterval(modelPollingRef.current);
-      modelPollingRef.current = null;
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
     }
-  }
-
-  async function checkModelAvailability() {
-    try {
-      const response = await fetch(
-        `${MODEL_PATH}?check=${Date.now()}`,
-        {
-          method: "HEAD",
-          cache: "no-store",
-        },
-      );
-
-      setModelAvailable(response.ok);
-      return response.ok;
-    } catch {
-      setModelAvailable(false);
-      return false;
-    }
-  }
-
-  function createTaskCode() {
-    const suffix = Math.floor(100000 + Math.random() * 900000);
-    return `YJ-${suffix}`;
   }
 
   function selectFile(file?: File) {
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       alert("请上传 JPG、PNG 或 WEBP 图片");
       return;
     }
@@ -248,8 +244,12 @@ export default function Home() {
     setPreviewUrl(URL.createObjectURL(file));
     setStatus("idle");
     setProgress(0);
-    setRemainingSeconds(DEMO_DURATION);
+    setRemainingSeconds(MINIMUM_DURATION);
     setTaskCode("--");
+    setModelUrl(null);
+    setModelName("生成模型.glb");
+    setErrorMessage("");
+    modelUrlRef.current = null;
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -257,88 +257,174 @@ export default function Home() {
     event.target.value = "";
   }
 
-  function startModelPolling() {
-    if (modelPollingRef.current) {
-      clearInterval(modelPollingRef.current);
+  function completeGeneration(url: string) {
+    clearTimers();
+    modelUrlRef.current = url;
+    setModelUrl(url);
+    setProgress(100);
+    setRemainingSeconds(0);
+
+    window.setTimeout(() => {
+      setStatus("completed");
+    }, 700);
+  }
+
+  function updateProgressClock() {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
     }
 
-    modelPollingRef.current = setInterval(async () => {
-      const ready = await checkModelAvailability();
+    progressTimerRef.current = setInterval(() => {
+      const elapsed = (Date.now() - startedAtRef.current) / 1000;
 
-      if (ready) {
-        if (modelPollingRef.current) {
-          clearInterval(modelPollingRef.current);
-          modelPollingRef.current = null;
-        }
+      if (elapsed < MINIMUM_DURATION) {
+        const ratio = elapsed / MINIMUM_DURATION;
+        const eased = Math.floor(
+          97 * (1 - Math.pow(1 - ratio, 1.45)),
+        );
 
-        setProgress(100);
-        setStatus("completed");
+        setProgress(Math.max(2, Math.min(97, eased)));
+        setRemainingSeconds(
+          Math.max(0, Math.ceil(MINIMUM_DURATION - elapsed)),
+        );
+        return;
       }
+
+      setRemainingSeconds(0);
+
+      if (modelUrlRef.current) {
+        completeGeneration(modelUrlRef.current);
+      } else {
+        setProgress(98);
+        setStatus("waiting");
+      }
+    }, 200);
+  }
+
+  async function pollJob(code: string) {
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(code)}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) return;
+
+      const job = (await response.json()) as JobStatusResponse;
+
+      if (job.model_url && job.status === "ready") {
+        modelUrlRef.current = job.model_url;
+        setModelUrl(job.model_url);
+        setModelName(job.model_name || "生成模型.glb");
+
+        const elapsed = (Date.now() - startedAtRef.current) / 1000;
+        if (elapsed >= MINIMUM_DURATION) {
+          completeGeneration(job.model_url);
+        }
+      }
+    } catch {
+      // 网络短暂波动时保持生成动画，下一轮继续查询。
+    }
+  }
+
+  function startPolling(code: string) {
+    void pollJob(code);
+
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+    }
+
+    pollingTimerRef.current = setInterval(() => {
+      void pollJob(code);
     }, 2000);
   }
 
-  async function finishGeneration() {
-    const ready = await checkModelAvailability();
-
-    if (ready) {
-      setProgress(100);
-      setRemainingSeconds(0);
-      setStatus("completed");
-      return;
-    }
-
-    setProgress(98);
-    setRemainingSeconds(0);
-    setStatus("waiting");
-    startModelPolling();
-  }
-
-  function startGeneration() {
+  async function startGeneration() {
     if (!uploadedFile || !previewUrl) {
       alert("请先上传一张图片，再开始生成模型");
       fileInputRef.current?.click();
       return;
     }
 
-    if (status === "processing") return;
+    if (status === "uploading" || status === "processing") return;
 
     clearTimers();
-    setTaskCode(createTaskCode());
-    setStatus("processing");
-    setProgress(0);
-    setRemainingSeconds(DEMO_DURATION);
+    modelUrlRef.current = null;
+    startedAtRef.current = Date.now();
+    setTaskCode("正在创建...");
+    setStatus("uploading");
+    setProgress(2);
+    setRemainingSeconds(MINIMUM_DURATION);
+    setModelUrl(null);
+    setErrorMessage("");
+    updateProgressClock();
 
-    const startedAt = Date.now();
+    try {
+      const createResponse = await fetch("/api/jobs/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fileName: uploadedFile.name,
+          fileType: uploadedFile.type,
+          fileSize: uploadedFile.size,
+        }),
+      });
 
-    generationTimerRef.current = setInterval(() => {
-      const elapsed = (Date.now() - startedAt) / 1000;
-      const ratio = Math.min(1, elapsed / DEMO_DURATION);
-      const easedProgress = Math.floor(
-        98 * (1 - Math.pow(1 - ratio, 1.45)),
-      );
+      const createResult = (await createResponse.json()) as
+        | CreatedJobResponse
+        | { error?: string };
 
-      setProgress(Math.min(98, easedProgress));
-      setRemainingSeconds(
-        Math.max(0, Math.ceil(DEMO_DURATION - elapsed)),
-      );
-
-      if (elapsed >= DEMO_DURATION) {
-        if (generationTimerRef.current) {
-          clearInterval(generationTimerRef.current);
-          generationTimerRef.current = null;
-        }
-
-        void finishGeneration();
+      if (!createResponse.ok || !("job" in createResult)) {
+        throw new Error(
+          "error" in createResult && createResult.error
+            ? createResult.error
+            : "创建任务失败",
+        );
       }
-    }, 200);
+
+      const code = createResult.job.code;
+      setTaskCode(code);
+
+      const supabase = getSupabaseBrowserClient();
+      const { error: uploadError } = await supabase.storage
+        .from(createResult.upload.bucket)
+        .uploadToSignedUrl(
+          createResult.upload.path,
+          createResult.upload.token,
+          uploadedFile,
+          {
+            contentType: uploadedFile.type,
+            cacheControl: "3600",
+          },
+        );
+
+      if (uploadError) {
+        throw new Error(`图片上传失败：${uploadError.message}`);
+      }
+
+      setStatus("processing");
+      startPolling(code);
+    } catch (error) {
+      clearTimers();
+      setStatus("error");
+      setProgress(0);
+      setRemainingSeconds(MINIMUM_DURATION);
+      setErrorMessage(
+        error instanceof Error ? error.message : "启动任务失败",
+      );
+    }
   }
 
   function resetWorkspace() {
     clearTimers();
+    modelUrlRef.current = null;
     setStatus("idle");
     setProgress(0);
-    setRemainingSeconds(DEMO_DURATION);
+    setRemainingSeconds(MINIMUM_DURATION);
     setTaskCode("--");
+    setModelUrl(null);
+    setErrorMessage("");
   }
 
   const fileSize = uploadedFile
@@ -349,6 +435,12 @@ export default function Home() {
     ? uploadedFile.type.replace("image/", "").toUpperCase()
     : "--";
 
+  const isBusy = status === "uploading" || status === "processing";
+  const isGenerating =
+    status === "uploading" ||
+    status === "processing" ||
+    status === "waiting";
+
   return (
     <main className={styles.app}>
       <div className={styles.background} aria-hidden="true">
@@ -357,13 +449,11 @@ export default function Home() {
         <div className={styles.auroraPurple} />
         <div className={styles.grid} />
         <div className={styles.noise} />
-
         <img
           className={styles.xiezhiBackground}
           src="/assets/xiezhi-bg.png"
           alt=""
         />
-
         <div className={styles.particles}>
           {Array.from({ length: 26 }).map((_, index) => (
             <span
@@ -388,7 +478,6 @@ export default function Home() {
             <span />
             <span />
           </div>
-
           <div className={styles.brandText}>
             <strong>AI·3D越境科技</strong>
             <span>AI VISUAL COMPUTING LAB</span>
@@ -405,7 +494,7 @@ export default function Home() {
         <div className={styles.headerActions}>
           <div className={styles.systemBadge}>
             <span />
-            演示引擎在线
+            云端协作在线
           </div>
           <button className={styles.iconButton} aria-label="帮助">
             ?
@@ -449,7 +538,7 @@ export default function Home() {
               <span className={styles.sectionCode}>IMAGE TO 3D</span>
               <h2>图片生成模型</h2>
             </div>
-            <span className={styles.demoTag}>DEMO</span>
+            <span className={styles.demoTag}>LIVE DEMO</span>
           </div>
 
           <div className={styles.modeTabs}>
@@ -514,17 +603,12 @@ export default function Home() {
             <div>
               <span>INPUT ASSET</span>
               <strong>
-                {uploadedFile
-                  ? uploadedFile.name
-                  : "尚未选择输入图片"}
+                {uploadedFile ? uploadedFile.name : "尚未选择输入图片"}
               </strong>
             </div>
-
             <span
               className={
-                uploadedFile
-                  ? styles.readyBadge
-                  : styles.waitingBadge
+                uploadedFile ? styles.readyBadge : styles.waitingBadge
               }
             >
               {uploadedFile ? "READY" : "WAITING"}
@@ -536,7 +620,6 @@ export default function Home() {
               <span>生成设置</span>
               <small>GENERATION CONFIG</small>
             </div>
-
             <div className={styles.settingRow}>
               <div>
                 <strong>几何质量</strong>
@@ -548,7 +631,6 @@ export default function Home() {
                 <option>超精细</option>
               </select>
             </div>
-
             <div className={styles.settingRow}>
               <div>
                 <strong>PBR 材质</strong>
@@ -558,7 +640,6 @@ export default function Home() {
                 <span />
               </button>
             </div>
-
             <div className={styles.settingRow}>
               <div>
                 <strong>智能拓扑</strong>
@@ -568,7 +649,6 @@ export default function Home() {
                 <span />
               </button>
             </div>
-
             <div className={styles.settingRow}>
               <div>
                 <strong>自动补全</strong>
@@ -584,8 +664,8 @@ export default function Home() {
             <div className={styles.engineIcon}>AI</div>
             <div>
               <span>生成引擎</span>
-              <strong>YUEJING 3D ENGINE</strong>
-              <small>高精度演示模式</small>
+              <strong>YUEJING CLOUD WORKFLOW</strong>
+              <small>双电脑协同演示模式</small>
             </div>
             <span className={styles.engineOnline} />
           </div>
@@ -593,23 +673,31 @@ export default function Home() {
           <button
             className={styles.generateButton}
             onClick={startGeneration}
-            disabled={!uploadedFile || status === "processing"}
+            disabled={!uploadedFile || isBusy}
           >
             <span>
-              {status === "processing"
-                ? `正在生成 ${progress}%`
-                : status === "waiting"
-                  ? "等待模型同步"
-                  : status === "completed"
-                    ? "重新生成模型"
-                    : "开始生成 3D 模型"}
+              {status === "uploading"
+                ? "正在上传输入图片"
+                : status === "processing"
+                  ? `正在生成 ${progress}%`
+                  : status === "waiting"
+                    ? "等待操作端上传模型"
+                    : status === "completed"
+                      ? "重新创建生成任务"
+                      : status === "error"
+                        ? "重新尝试"
+                        : "开始生成 3D 模型"}
             </span>
             <span className={styles.buttonArrow}>→</span>
           </button>
 
+          {errorMessage && (
+            <div className={styles.cloudError}>{errorMessage}</div>
+          )}
+
           <p className={styles.demoNotice}>
-            系统将至少展示 60 秒生成过程；模型未就绪时会停在
-            98% 等待同步。
+            点击后会创建云端任务。另一台电脑打开 /operator，上传对应
+            GLB；前台至少等待 60 秒后自动展示模型。
           </p>
         </aside>
 
@@ -625,16 +713,19 @@ export default function Home() {
                 <strong>
                   {status === "idle"
                     ? "等待输入"
-                    : status === "processing"
-                      ? "AI 模型重建中"
-                      : status === "waiting"
-                        ? "等待模型同步"
-                        : "模型生成完成"}
+                    : status === "uploading"
+                      ? "正在上传输入资产"
+                      : status === "processing"
+                        ? "AI 模型重建中"
+                        : status === "waiting"
+                          ? "等待操作端同步模型"
+                          : status === "completed"
+                            ? "模型生成完成"
+                            : "任务启动失败"}
                 </strong>
                 <span>PROJECT / {taskCode}</span>
               </div>
             </div>
-
             <div className={styles.viewportTools}>
               <button>适应视图</button>
               <button>网格</button>
@@ -650,22 +741,18 @@ export default function Home() {
               <i />
             </div>
 
-            {status === "idle" && (
+            {(status === "idle" || status === "error") && (
               <div className={styles.idleState}>
                 {previewUrl ? (
                   <>
                     <div className={styles.idleArtwork}>
-                      <img
-                        src={previewUrl}
-                        alt="当前上传的参考图片"
-                      />
+                      <img src={previewUrl} alt="当前上传的参考图片" />
                       <div className={styles.idleGlow} />
                       <div className={styles.idleLabel}>
                         <span>REFERENCE IMAGE</span>
                         <strong>{uploadedFile?.name}</strong>
                       </div>
                     </div>
-
                     <div className={styles.idleCopy}>
                       <span className={styles.copyEyebrow}>
                         INPUT ASSET READY
@@ -676,10 +763,9 @@ export default function Home() {
                         准备三维重建
                       </h1>
                       <p>
-                        点击左侧“开始生成 3D 模型”，系统将依次展示
-                        视觉解析、深度估计、点云构建、网格重建与材质生成。
+                        点击左侧开始按钮，系统将创建任务编号并把图片同步到
+                        操作端。生成的 GLB 上传后会自动回传到此视口。
                       </p>
-
                       <div className={styles.readyInformation}>
                         <span>图像格式</span>
                         <strong>{fileFormat}</strong>
@@ -699,18 +785,15 @@ export default function Home() {
                       <div className={styles.emptyOrbit} />
                       <div className={styles.emptyOrbitSecond} />
                     </div>
-
-                    <span className={styles.copyEyebrow}>
-                      AI IMAGE TO 3D
-                    </span>
+                    <span className={styles.copyEyebrow}>AI IMAGE TO 3D</span>
                     <h1>
                       上传图像
                       <br />
                       开启三维创造
                     </h1>
                     <p>
-                      从左侧上传一张 JPG、PNG 或 WEBP 图片，
-                      系统将在生成过程中展示完整的 AI 三维重建流程。
+                      上传 JPG、PNG 或 WEBP 图片，系统将展示完整的三维重建
+                      流程，并等待操作端同步真实 GLB 模型。
                     </p>
                     <button
                       className={styles.emptyWorkspaceButton}
@@ -724,7 +807,7 @@ export default function Home() {
               </div>
             )}
 
-            {(status === "processing" || status === "waiting") && (
+            {isGenerating && (
               <div className={styles.processingState}>
                 <img
                   className={styles.processingImage}
@@ -733,14 +816,12 @@ export default function Home() {
                 />
                 <div className={styles.processingShade} />
                 <div className={styles.scanLine} />
-
                 <div className={styles.scanFrame}>
                   <span />
                   <span />
                   <span />
                   <span />
                 </div>
-
                 <div className={styles.pointCloud}>
                   {Array.from({ length: 66 }).map((_, index) => (
                     <i
@@ -758,26 +839,25 @@ export default function Home() {
 
                 <div className={styles.processingHud}>
                   <CircularProgress progress={progress} />
-
                   <div className={styles.processingText}>
-                    <span>
-                      STAGE {currentPhase.number} / 05
-                    </span>
+                    <span>STAGE {currentPhase.number} / 05</span>
                     <h2>
-                      {status === "waiting"
-                        ? "等待模型同步"
-                        : currentPhase.title}
+                      {status === "uploading"
+                        ? "同步输入资产"
+                        : status === "waiting"
+                          ? "等待模型同步"
+                          : currentPhase.title}
                     </h2>
                     <p>
-                      {status === "waiting"
-                        ? "生成流程已完成，正在等待操作端上传 GLB 模型"
-                        : currentPhase.subtitle}
+                      {status === "uploading"
+                        ? "正在将输入图片上传至云端任务中心"
+                        : status === "waiting"
+                          ? `任务 ${taskCode} 已完成前置处理，等待操作端上传 GLB`
+                          : currentPhase.subtitle}
                     </p>
-
                     <div className={styles.progressBar}>
                       <div style={{ width: `${progress}%` }} />
                     </div>
-
                     <div className={styles.progressMeta}>
                       <span>
                         ESTIMATED TIME
@@ -790,20 +870,10 @@ export default function Home() {
                         </strong>
                       </span>
                       <span>
-                        VERTICES
-                        <strong>
-                          {Math.floor(
-                            4280 + progress * 2167,
-                          ).toLocaleString()}
-                        </strong>
+                        JOB ID <strong>{taskCode}</strong>
                       </span>
                       <span>
-                        FACES
-                        <strong>
-                          {Math.floor(
-                            2100 + progress * 1059,
-                          ).toLocaleString()}
-                        </strong>
+                        MODEL <strong>{modelUrl ? "READY" : "PENDING"}</strong>
                       </span>
                     </div>
                   </div>
@@ -840,32 +910,30 @@ export default function Home() {
               </div>
             )}
 
-            {status === "completed" && (
+            {status === "completed" && modelUrl && (
               <div className={styles.completedState}>
                 <div className={styles.modelCanvas}>
-                  <ModelViewport url={MODEL_PATH} />
+                  <ModelViewport url={modelUrl} />
                 </div>
-
                 <div className={styles.completedBadge}>
                   <span className={styles.completedCheck}>✓</span>
                   <div>
                     <span>GENERATION COMPLETE</span>
-                    <strong>高精度三维模型已同步</strong>
+                    <strong>{modelName}</strong>
                   </div>
                 </div>
-
                 <div className={styles.modelStatistics}>
                   <div>
-                    <span>顶点</span>
-                    <strong>220,980</strong>
+                    <span>任务</span>
+                    <strong>{taskCode}</strong>
                   </div>
                   <div>
-                    <span>面数</span>
-                    <strong>108,024</strong>
+                    <span>状态</span>
+                    <strong>READY</strong>
                   </div>
                   <div>
                     <span>材质</span>
-                    <strong>PBR 4K</strong>
+                    <strong>PBR</strong>
                   </div>
                   <div>
                     <span>格式</span>
@@ -885,12 +953,12 @@ export default function Home() {
                 <strong>WEBGL</strong>
               </div>
               <div>
-                <span>ENGINE</span>
-                <strong>YJ-3D</strong>
+                <span>CLOUD</span>
+                <strong>SUPABASE</strong>
               </div>
               <div>
                 <span>MODEL</span>
-                <strong>{modelAvailable ? "READY" : "PENDING"}</strong>
+                <strong>{modelUrl ? "READY" : "PENDING"}</strong>
               </div>
               <button onClick={resetWorkspace}>重置视图</button>
             </div>
@@ -931,9 +999,7 @@ export default function Home() {
                   {uploadedFile ? uploadedFile.name : "等待输入图片"}
                 </strong>
                 <span>
-                  {uploadedFile
-                    ? `IMAGE · ${fileFormat}`
-                    : "IMAGE · EMPTY"}
+                  {uploadedFile ? `IMAGE · ${fileFormat}` : "IMAGE · EMPTY"}
                 </span>
               </div>
               <span className={styles.assetMenu}>•••</span>
@@ -946,7 +1012,7 @@ export default function Home() {
                 <span>3D</span>
               </div>
               <div className={styles.assetInformation}>
-                <strong>生成模型</strong>
+                <strong>{modelName}</strong>
                 <span>
                   {status === "completed"
                     ? "MODEL · READY"
@@ -968,34 +1034,37 @@ export default function Home() {
               <span>任务信息</span>
               <small>DETAILS</small>
             </div>
-
             <dl>
               <div>
                 <dt>任务编号</dt>
                 <dd>{taskCode}</dd>
               </div>
               <div>
-                <dt>创建方式</dt>
-                <dd>图片生成 3D</dd>
+                <dt>协作模式</dt>
+                <dd>双电脑同步</dd>
               </div>
               <div>
-                <dt>模型质量</dt>
-                <dd>高精度</dd>
+                <dt>最低等待</dt>
+                <dd>60 秒</dd>
               </div>
               <div>
-                <dt>纹理规格</dt>
-                <dd>PBR · 4K</dd>
+                <dt>云端存储</dt>
+                <dd>Supabase</dd>
               </div>
               <div>
                 <dt>生成状态</dt>
                 <dd>
                   {status === "idle"
                     ? "等待开始"
-                    : status === "processing"
-                      ? `${progress}%`
-                      : status === "waiting"
-                        ? "等待模型同步"
-                        : "已完成"}
+                    : status === "uploading"
+                      ? "上传输入图片"
+                      : status === "processing"
+                        ? `${progress}%`
+                        : status === "waiting"
+                          ? "等待模型同步"
+                          : status === "completed"
+                            ? "已完成"
+                            : "启动失败"}
                 </dd>
               </div>
             </dl>
@@ -1006,9 +1075,13 @@ export default function Home() {
               <span className={styles.storageBar}>
                 <i />
               </span>
-              <span>项目存储 1.28 GB / 10 GB</span>
+              <span>任务资产通过云端跨设备同步</span>
             </div>
-            <button>管理资产</button>
+            <button
+              onClick={() => window.open("/operator", "_blank")}
+            >
+              打开操作端
+            </button>
           </div>
         </aside>
       </div>

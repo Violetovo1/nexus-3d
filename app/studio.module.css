@@ -2126,3 +2126,14 @@
     opacity: 0.055;
   }
 }
+
+.cloudError {
+  margin-top: 10px;
+  padding: 10px 12px;
+  color: #ffb6b6;
+  font-size: 9px;
+  line-height: 1.55;
+  border: 1px solid rgba(255, 91, 91, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 74, 74, 0.07);
+}
