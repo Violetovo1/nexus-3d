@@ -1,20 +1,20 @@
 "use client";
 
-import {useState,useEffect} from "react";
+import {useState} from "react";
 import {Canvas} from "@react-three/fiber";
 import {OrbitControls,useGLTF} from "@react-three/drei";
 
 
 function Model(){
 
- const {scene}=useGLTF("/models/demo.glb");
+const {scene}=useGLTF("/models/demo.glb");
 
- return (
-   <primitive 
-    object={scene}
-    scale={1.5}
-   />
- )
+return(
+<primitive
+object={scene}
+scale={1.5}
+/>
+)
 
 }
 
@@ -22,7 +22,10 @@ function Model(){
 
 export default function Home(){
 
+
 const [file,setFile]=useState<File|null>(null);
+
+const [image,setImage]=useState("");
 
 const [loading,setLoading]=useState(false);
 
@@ -32,60 +35,74 @@ const [done,setDone]=useState(false);
 
 
 
-function startGenerate(){
+function upload(e:any){
 
- if(!file)return;
+const f=e.target.files[0];
 
- setLoading(true);
- setDone(false);
- setProgress(0);
+if(!f)return;
+
+
+setFile(f);
+
+setImage(URL.createObjectURL(f));
 
 }
 
 
 
-useEffect(()=>{
-
- if(!loading)return;
+function startGenerate(){
 
 
- const timer=setInterval(()=>{
-
-  setProgress(p=>{
-
-   if(p>=100){
-
-    clearInterval(timer);
-
-    setTimeout(()=>{
-
-     setLoading(false);
-     setDone(true);
-
-    },500)
-
-    return 100;
-
-   }
-
-   return p+1;
-
-  })
+if(!file)return;
 
 
- },600);
+setLoading(true);
 
+setDone(false);
 
-return ()=>clearInterval(timer);
-
-
-},[loading]);
+setProgress(0);
 
 
 
+let p=0;
 
 
-return (
+const timer=setInterval(()=>{
+
+
+p+=2;
+
+
+setProgress(p);
+
+
+
+if(p>=100){
+
+
+clearInterval(timer);
+
+
+setLoading(false);
+
+setDone(true);
+
+
+}
+
+
+
+},1200);
+
+
+
+}
+
+
+
+
+return(
+
 
 <div className="page">
 
@@ -95,37 +112,56 @@ NEXUS 3D
 </h1>
 
 
-<p className="sub">
+<p className="subtitle">
 AI Image To 3D Studio
 </p>
 
 
 
-<div className="upload">
+<div className="workspace">
+
+
+
+{/* 左侧上传 */}
+
+
+<div className="panel">
+
+
+<h2>
+输入图片
+</h2>
+
+
+<label className="upload">
+
+
+选择图片
 
 
 <input
-
 type="file"
-
 accept="image/*"
-
-onChange={(e)=>{
-
-if(e.target.files)
-
-setFile(e.target.files[0])
-
-}}
-
+onChange={upload}
 />
+
+
+</label>
+
+
+
+{
+image &&
+<img
+src={image}
+className="preview"
+/>
+}
 
 
 
 <button
-
 onClick={startGenerate}
-
 >
 
 开始生成3D模型
@@ -133,70 +169,90 @@ onClick={startGenerate}
 </button>
 
 
+
 </div>
 
 
 
 
+
+{/* 中间生成 */}
+
+
+
+<div className="panel center">
+
+
+
 {
+
 loading &&
 
-<div className="ai-box">
+<div className="loading">
+
+
+<div className="scanner">
+
+</div>
+
 
 
 <h2>
-AI正在生成3D模型
+AI正在重建三维空间
 </h2>
 
 
-
-<div className="scan"></div>
-
-
-
-<h3>
-{
-progress<20?
-"正在分析图片结构":
-
-progress<40?
-"正在提取空间信息":
-
-progress<60?
-"正在生成三维点云":
-
-progress<80?
-"正在重建Mesh模型":
-
-"正在进行材质贴图"
-}
-
-</h3>
-
+<p>
+模型拓扑分析：
+{progress}%
+</p>
 
 
 
 <div className="bar">
 
+
 <div
-
+className="barInner"
 style={{
-
 width:`${progress}%`
-
 }}
+>
 
-/>
+
+</div>
+
 
 </div>
 
 
-<p>
-{progress}%
-</p>
+
+<div className="steps">
+
+
+{
+
+progress<30?
+"识别图片结构":
+
+progress<60?
+"生成三维网格":
+
+progress<90?
+"优化模型纹理":
+
+"完成模型构建"
+
+
+}
 
 
 </div>
+
+
+
+</div>
+
 
 }
 
@@ -205,22 +261,50 @@ width:`${progress}%`
 
 
 {
+
+!loading && !done &&
+
+<div className="idle">
+
+
+等待生成
+
+
+</div>
+
+
+}
+
+
+
+
+
+{
+
 done &&
 
-<div className="viewer">
+
+<div className="modelBox">
 
 
 <h2>
-AI生成完成
+生成完成
 </h2>
 
 
-<Canvas>
+<Canvas
+camera={{
+position:[0,0,3]
+}}
+>
 
 
 <ambientLight intensity={2}/>
 
-<directionalLight position={[3,3,3]}/>
+
+<directionalLight
+position={[3,3,3]}
+/>
 
 
 <Model/>
@@ -234,13 +318,25 @@ AI生成完成
 
 </div>
 
-}
 
+}
 
 
 
 </div>
 
+
+
+</div>
+
+
+
+</div>
+
+
+
 )
+
+
 
 }
