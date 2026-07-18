@@ -297,6 +297,13 @@ export default function Home() {
         <div className={styles.grid} />
         <div className={styles.noise} />
 
+        <img
+  className={styles.xiezhiBackground}
+  src="/assets/xiezhi-bg.png"
+  alt=""
+  aria-hidden="true"
+/>
+
         <div className={styles.particles}>
           {Array.from({ length: 24 }).map((_, index) => (
             <span
@@ -452,7 +459,7 @@ export default function Home() {
               <strong>
                 {uploadedFile
                   ? uploadedFile.name
-                  : "獬豸黄金摆件.jpg"}
+                  : "模型.jpg"}
               </strong>
             </div>
 
@@ -612,14 +619,14 @@ export default function Home() {
                 <div className={styles.idleArtwork}>
                   <img
                     src={previewUrl}
-                    alt="獬豸黄金摆件"
+                    alt="模型"
                   />
 
                   <div className={styles.idleGlow} />
 
                   <div className={styles.idleLabel}>
                     <span>REFERENCE IMAGE</span>
-                    <strong>獬豸黄金摆件</strong>
+                    <strong>模型</strong>
                   </div>
                 </div>
 
@@ -785,7 +792,7 @@ export default function Home() {
 
                   <div>
                     <span>GENERATION COMPLETE</span>
-                    <strong>獬豸黄金摆件 · 高精度模型</strong>
+                    <strong>高精度模型</strong>
                   </div>
                 </div>
 
@@ -901,7 +908,7 @@ export default function Home() {
               </div>
 
               <div className={styles.assetInformation}>
-                <strong>獬豸模型</strong>
+                <strong>模型</strong>
                 <span>
                   {status === "completed"
                     ? "MODEL · READY"
@@ -928,7 +935,7 @@ export default function Home() {
             <dl>
               <div>
                 <dt>项目名称</dt>
-                <dd>獬豸黄金摆件</dd>
+                <dd>模型</dd>
               </div>
 
               <div>
