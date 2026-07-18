@@ -1,114 +1,246 @@
 "use client";
 
-import { useState } from "react";
-
-export default function Home() {
-
-  const [file,setFile] = useState<File | null>(null);
-  const [status,setStatus] = useState("");
-  const [model,setModel] = useState("");
+import {useState,useEffect} from "react";
+import {Canvas} from "@react-three/fiber";
+import {OrbitControls,useGLTF} from "@react-three/drei";
 
 
-  async function generate(){
+function Model(){
 
-    if(!file){
-      alert("请先上传图片");
-      return;
-    }
+ const {scene}=useGLTF("/models/demo.glb");
 
+ return (
+   <primitive 
+    object={scene}
+    scale={1.5}
+   />
+ )
 
-    setStatus("正在上传图片...");
-
-
-    // 临时使用图片地址
-    const imageUrl = URL.createObjectURL(file);
-
-
-    setStatus("正在调用 Tripo AI 生成3D模型...");
+}
 
 
-    const res = await fetch("/api/generate",{
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json"
-      },
-      body:JSON.stringify({
-        imageUrl
-      })
-    });
+
+export default function Home(){
+
+const [file,setFile]=useState<File|null>(null);
+
+const [loading,setLoading]=useState(false);
+
+const [progress,setProgress]=useState(0);
+
+const [done,setDone]=useState(false);
 
 
-    const data = await res.json();
+
+function startGenerate(){
+
+ if(!file)return;
+
+ setLoading(true);
+ setDone(false);
+ setProgress(0);
+
+}
 
 
-    console.log(data);
+
+useEffect(()=>{
+
+ if(!loading)return;
 
 
-    if(data){
-      setStatus("生成任务已提交");
-      setModel(JSON.stringify(data,null,2));
-    }
+ const timer=setInterval(()=>{
+
+  setProgress(p=>{
+
+   if(p>=100){
+
+    clearInterval(timer);
+
+    setTimeout(()=>{
+
+     setLoading(false);
+     setDone(true);
+
+    },500)
+
+    return 100;
+
+   }
+
+   return p+1;
+
+  })
 
 
-  }
+ },600);
 
 
-  return (
-    <main
-      style={{
-        minHeight:"100vh",
-        background:"#050816",
-        color:"white",
-        padding:"50px"
-      }}
-    >
-
-      <h1>
-        NEXUS 3D
-      </h1>
+return ()=>clearInterval(timer);
 
 
-      <p>
-        AI Image to 3D Studio
-      </p>
+},[loading]);
 
 
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e)=>
-          setFile(
-            e.target.files?.[0] || null
-          )
-        }
-      />
 
 
-      <br/><br/>
+
+return (
+
+<div className="page">
 
 
-      <button
-        onClick={generate}
-        style={{
-          padding:"15px 30px",
-          borderRadius:"10px",
-          cursor:"pointer"
-        }}
-      >
-        开始生成3D模型
-      </button>
+<h1>
+NEXUS 3D
+</h1>
 
 
-      <h3>
-        {status}
-      </h3>
+<p className="sub">
+AI Image To 3D Studio
+</p>
 
 
-      <pre>
-        {model}
-      </pre>
+
+<div className="upload">
 
 
-    </main>
-  );
+<input
+
+type="file"
+
+accept="image/*"
+
+onChange={(e)=>{
+
+if(e.target.files)
+
+setFile(e.target.files[0])
+
+}}
+
+/>
+
+
+
+<button
+
+onClick={startGenerate}
+
+>
+
+开始生成3D模型
+
+</button>
+
+
+</div>
+
+
+
+
+{
+loading &&
+
+<div className="ai-box">
+
+
+<h2>
+AI正在生成3D模型
+</h2>
+
+
+
+<div className="scan"></div>
+
+
+
+<h3>
+{
+progress<20?
+"正在分析图片结构":
+
+progress<40?
+"正在提取空间信息":
+
+progress<60?
+"正在生成三维点云":
+
+progress<80?
+"正在重建Mesh模型":
+
+"正在进行材质贴图"
+}
+
+</h3>
+
+
+
+
+<div className="bar">
+
+<div
+
+style={{
+
+width:`${progress}%`
+
+}}
+
+/>
+
+</div>
+
+
+<p>
+{progress}%
+</p>
+
+
+</div>
+
+}
+
+
+
+
+
+{
+done &&
+
+<div className="viewer">
+
+
+<h2>
+AI生成完成
+</h2>
+
+
+<Canvas>
+
+
+<ambientLight intensity={2}/>
+
+<directionalLight position={[3,3,3]}/>
+
+
+<Model/>
+
+
+<OrbitControls/>
+
+
+</Canvas>
+
+
+</div>
+
+}
+
+
+
+
+</div>
+
+)
+
 }
