@@ -2127,13 +2127,72 @@
   }
 }
 
-.cloudError {
-  margin-top: 10px;
-  padding: 10px 12px;
-  color: #ffb6b6;
-  font-size: 9px;
-  line-height: 1.55;
-  border: 1px solid rgba(255, 91, 91, 0.22);
-  border-radius: 8px;
-  background: rgba(255, 74, 74, 0.07);
+
+/* ===== 越境科技品牌 Logo 页头优化 ===== */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 270px;
+}
+
+.brandLogoImage {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  object-fit: contain;
+  object-position: center;
+  filter:
+    drop-shadow(0 0 12px rgba(55, 196, 118, 0.18))
+    drop-shadow(0 0 18px rgba(95, 74, 188, 0.12));
+  user-select: none;
+  pointer-events: none;
+}
+
+.brandText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.brandText strong {
+  color: #f4f1e9;
+  font-size: 22px;
+  font-weight: 720;
+  line-height: 1;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  text-shadow: 0 0 18px rgba(229, 183, 95, 0.08);
+}
+
+.brandText span {
+  margin-top: 7px;
+  color: rgba(202, 205, 213, 0.48);
+  font-size: 7px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.31em;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .brand {
+    min-width: auto;
+    gap: 9px;
+  }
+
+  .brandLogoImage {
+    width: 41px;
+    height: 41px;
+    flex-basis: 41px;
+  }
+
+  .brandText strong {
+    font-size: 18px;
+  }
+
+  .brandText span {
+    display: none;
+  }
 }
