@@ -484,13 +484,13 @@ export default function Home() {
 
       <header className={styles.header}>
         <div className={styles.brand}>
-          <div className={styles.logo}>
-            <span />
-            <span />
-            <span />
-          </div>
+          <img
+            className={styles.brandLogoImage}
+            src="/assets/yuejing-logo-mark.png"
+            alt="越境科技 Logo"
+          />
           <div className={styles.brandText}>
-            <strong>AI·3D越境科技</strong>
+            <strong>越境科技</strong>
             <span>AI VISUAL COMPUTING LAB</span>
           </div>
         </div>
